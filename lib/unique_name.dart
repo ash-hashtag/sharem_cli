@@ -2399,10 +2399,13 @@ const colors = [
   "Zumthor"
 ];
 
-String generateUniqueName() {
+String generateUniqueName([int maxLength = 20]) {
   final rng = Random();
   final color = colors[rng.nextInt(colors.length)];
   final fruit = fruitNames[rng.nextInt(fruitNames.length)];
 
+  if (color.length + fruit.length + 1 > maxLength) {
+    return generateUniqueName(maxLength);
+  }
   return "$color $fruit";
 }
