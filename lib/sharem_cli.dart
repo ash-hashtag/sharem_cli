@@ -10,7 +10,10 @@ import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
 
 const port = 6972;
-final environmentMap = <String, String>{};
+
+String? getEnvironmentVariable(String key) {
+  return bool.hasEnvironment(key) ? String.fromEnvironment(key) : null;
+}
 
 class Message {
   final InternetAddress fromAddress;
@@ -30,7 +33,8 @@ class Message {
 }
 
 // final broadcastAddress = InternetAddress("255.255.255.255");
-final broadcastAddress = InternetAddress("127.0.0.1");
+final broadcastAddress = InternetAddress(
+    getEnvironmentVariable("SHAREM_BROADCAST_ADDR") ?? "127.0.0.1");
 
 Future<void> startBroadcasting(String payload, Duration interval) async {
   while (true) {
@@ -110,6 +114,9 @@ class SharemFile {
         yield chunk;
         bytesSent += chunk.lengthInBytes;
         progressCallback(bytesSent, totalByteLength);
+
+        // throttle
+        // await Future.delayed(Duration(milliseconds: 5));
       }
     } else if (_rawBody != null) {
       var sentInBytes = 0;
@@ -143,55 +150,18 @@ typedef ProgressCallback = void Function(int bytesUploaded, int totalBytes);
 
 void emptyProgressCallback(int _, int __) {}
 
-Future<void> sendToHttpServer(
-  SharemPeer peer, {
-  SharemFile? file,
-  String? text,
-  ProgressCallback progressCallback = emptyProgressCallback,
-}) async {
-  final headers = <String, String>{};
-
-  if (file != null) {
-    headers['Content-Length'] = (await file.fileLength()).toString();
-    final uri = peer.buildUri(ShareType.file, file.fileName);
-    final request = http.StreamedRequest("POST", uri);
-    request.headers.addAll(headers);
-    request.sink
-        .addStream(file.asStream(progressCallback: progressCallback))
-        .then((_) => request.sink.close());
-
-    final response = await request.send();
-    final body = await response.stream.toBytes();
-    if (response.statusCode != 200) {
-      throw Exception(
-          "Response ${response.statusCode} ${String.fromCharCodes(body)}");
-    }
-  } else if (text != null) {
-    final response = await http.post(peer.buildUri(ShareType.text), body: text);
-    final body = response.body;
-    if (response.statusCode != 200) {
-      throw Exception("Response ${response.statusCode} $body");
-    }
-  }
-}
-
 class ServerCallbacks {
   FutureOr<void> Function(String text) onTextCallback;
   FutureOr<void> Function(
       String fileName, int fileLength, Stream<List<int>> stream) onFileCallback;
 
+  FutureOr<bool> Function(SharemFileShareRequest request) onFileShareRequest;
+
   ServerCallbacks({
     required this.onTextCallback,
     required this.onFileCallback,
+    required this.onFileShareRequest,
   });
-
-  factory ServerCallbacks.empty() {
-    return ServerCallbacks(
-      onTextCallback: (String text) {},
-      onFileCallback:
-          (String fileName, int fileLength, Stream<List<int>> stream) {},
-    );
-  }
 }
 
 Future<HttpServer> startHttpServer(int port,
@@ -248,6 +218,31 @@ Future<Response> handlePost(
         return Response(200);
       }
 
+    case "files":
+      {
+        final body = await request.readAsString();
+        final clientAddress =
+            (request.context['shelf.io.connection_info'] as HttpConnectionInfo?)
+                ?.remoteAddress
+                .address;
+
+        if (clientAddress == null) {
+          return Response(400, body: "Client Address Can't be found");
+        }
+        final fileRequest = SharemFileShareRequest.fromJSON(
+            InternetAddress(clientAddress), body);
+
+        if (null != callbacks) {
+          if (await callbacks.onFileShareRequest(fileRequest)) {
+            return Response(200, body: "Ready to accept these files");
+          } else {
+            return Response(403, body: "Rejected");
+          }
+        }
+
+        return Response(503, body: "Unreachable");
+      }
+
     default:
       return Response(404, body: "Invalid Path ${request.url.path}");
   }
@@ -258,17 +253,42 @@ bool isValidFileName(String fileName) {
   return regexp.stringMatch(fileName) == fileName;
 }
 
+class SharemFileShareRequest {
+  final String uniqueName;
+  final InternetAddress address;
+  final Map<String, int> fileNameAndLength;
+
+  const SharemFileShareRequest(
+      this.uniqueName, this.address, this.fileNameAndLength);
+
+  factory SharemFileShareRequest.fromJSON(
+      InternetAddress address, String body) {
+    final map = Map<String, dynamic>.from(json.decode(body));
+    assert(map['version'] == protocolVersion);
+    return SharemFileShareRequest(
+        map['uniqueName'], address, Map<String, int>.from(map['files']));
+  }
+
+  String toJSON() {
+    return json.encode({
+      'uniqueName': uniqueName,
+      'files': fileNameAndLength,
+      'version': protocolVersion,
+    });
+  }
+}
+
+const protocolVersion = "sharem-0.0.1";
+
 class SharemPeerMessage {
   final int port;
   final String uniqueName;
-
-  static const version = "sharem-0.0.1";
 
   SharemPeerMessage(this.port, this.uniqueName);
 
   String toJSON() {
     return json.encode({
-      'version': version,
+      'version': protocolVersion,
       'port': port,
       'uniqueName': uniqueName,
     });
@@ -276,13 +296,14 @@ class SharemPeerMessage {
 
   factory SharemPeerMessage.fromJSON(String s) {
     final map = Map<String, dynamic>.from(json.decode(s));
-    assert(map['version'] == version);
+    assert(map['version'] == protocolVersion);
     return SharemPeerMessage(map['port'], map['uniqueName']);
   }
 }
 
 enum ShareType {
   file,
+  files,
   text,
 }
 
@@ -329,16 +350,148 @@ class SharemPeer {
 
       case ShareType.text:
         return Uri.parse("http://${address.host}:$port/text");
+      case ShareType.files:
+        return Uri.parse("http://${address.host}:$port/files");
     }
   }
 
   Future<void> sendText(String text) async {
-    await sendToHttpServer(this, text: text);
+    final headers = <String, String>{};
+    final response =
+        await http.post(buildUri(ShareType.text), body: text, headers: headers);
+    final body = response.body;
+    if (response.statusCode != 200) {
+      throw Exception("Response ${response.statusCode} $body");
+    }
   }
 
   Future<void> sendFile(SharemFile file,
       {ProgressCallback progressCallback = emptyProgressCallback}) async {
-    await sendToHttpServer(this,
-        file: file, progressCallback: progressCallback);
+    final headers = <String, String>{};
+    headers['Content-Length'] = (await file.fileLength()).toString();
+    final uri = buildUri(ShareType.file, file.fileName);
+    final request = http.StreamedRequest("POST", uri);
+    request.headers.addAll(headers);
+    request.sink
+        .addStream(file.asStream(progressCallback: progressCallback))
+        .then((_) => request.sink.close());
+
+    final response = await request.send();
+    final body = String.fromCharCodes(await response.stream.toBytes());
+    log("Send File $uri Response ${response.statusCode} $body");
+    if (response.statusCode != 200) {
+      throw Exception("Response ${response.statusCode} $body");
+    }
   }
+
+  Future<void> sendFiles(String myUniqueName, List<SharemFile> files,
+      {void Function(String fileName, int totalBytes, int bytesTransferred)?
+          progressCallback}) async {
+    {
+      final map = Map.fromEntries(await Future.wait(
+          files.map((e) async => MapEntry(e.fileName, await e.fileLength()))));
+
+      final payload =
+          SharemFileShareRequest(myUniqueName, InternetAddress.anyIPv4, map)
+              .toJSON();
+
+      final uri = buildUri(ShareType.files);
+      final response = await http.post(uri, body: payload);
+
+      final body = response.body;
+      log("Send Files $uri Response ${response.statusCode} $body");
+      if (response.statusCode != 200) {
+        // Rejected
+        throw Exception("Response ${response.statusCode} $body");
+      }
+      // Accepted
+
+      await Future.wait(files.map((e) => sendFile(e,
+          progressCallback: progressCallback == null
+              ? emptyProgressCallback
+              : (bytesUploaded, totalBytes) =>
+                  progressCallback(e.fileName, totalBytes, bytesUploaded))));
+    }
+  }
+}
+
+class PeerState {
+  final SharemPeer selfPeer;
+
+  PeerState._(this.selfPeer);
+
+  static Future<PeerState> initalize(
+      {String? myName, ServerCallbacks? callbacks}) async {
+    final selfPeer =
+        await SharemPeer.initalize(callbacks: callbacks, myName: myName);
+    final payload = selfPeer.toMessage().toJSON();
+    startBroadcasting(payload, const Duration(seconds: 1));
+    final state = PeerState._(selfPeer);
+    return state;
+  }
+}
+
+class PeerGatherer {
+  final Map<String, SharemPeer> _peers = {};
+  StreamSubscription? _subscription;
+  PeerGatherer();
+
+  void startGathering([void Function(SharemPeer)? callback]) {
+    _subscription = listenForPeers().listen((peer) {
+      if (_peers[peer.uniqueName.toLowerCase()] == null) {
+        if (callback != null) {
+          callback(peer);
+        }
+      }
+      _peers[peer.uniqueName.toLowerCase()] = peer;
+    });
+  }
+
+  SharemPeer? getPeerByName(String name) {
+    return _peers[name.toLowerCase()];
+  }
+
+  get length => _peers.length;
+
+  void dispose() {
+    _subscription?.cancel();
+    _subscription = null;
+  }
+}
+
+// final _logFile =
+//     File("/tmp/sharem_cli-${DateTime.now().millisecondsSinceEpoch}.log")
+//         .openWrite();
+void log(String s) {
+  // _logFile.writeln(s);
+}
+
+Future<void> flushLog() async {
+  // await _logFile.flush();
+  // await _logFile.close();
+}
+
+String formatBytes(int n, [int fixed = 2]) {
+  const kilo = 1000;
+  const mega = 1000 * kilo;
+  const giga = 1000 * mega;
+  const tera = 1000 * giga;
+
+  if (n < kilo) {
+    return "${n}B";
+  }
+
+  if (n < mega) {
+    return "${(n / kilo).toStringAsFixed(fixed)}KB";
+  }
+
+  if (n < giga) {
+    return "${(n / mega).toStringAsFixed(fixed)}MB";
+  }
+
+  if (n < tera) {
+    return "${(n / giga).toStringAsFixed(fixed)}GB";
+  }
+
+  return "${(n / tera).toStringAsFixed(fixed)}TB";
 }
