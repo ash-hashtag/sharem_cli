@@ -45,11 +45,13 @@ Future<void> startBroadcasting(
 Future<void> sendBroadcast(
     String payload, InternetAddress broadcastAddress) async {
   final sender = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+  sender.broadcastEnabled = true;
   sender.send(payload.codeUnits, broadcastAddress, port);
 }
 
 Stream<SharemMessage> listenForBroadcasts() async* {
   final receiver = await RawDatagramSocket.bind(InternetAddress.anyIPv4, port);
+  receiver.broadcastEnabled = true;
 
   await for (final event in receiver) {
     if (event == RawSocketEvent.read) {

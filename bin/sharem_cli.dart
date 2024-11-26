@@ -233,6 +233,11 @@ Future<void> receiveCommand({String? myName, bool useLocalhost = false}) async {
       return false;
     }
   });
+
+  if (useLocalhost) {
+    print("WARN: Using Localhost");
+  }
+
   final state = await PeerState.initalize(
       InternetAddress(useLocalhost ? "127.0.0.1" : "255.255.255.255"),
       callbacks: callbacks,
