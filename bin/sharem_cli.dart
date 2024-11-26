@@ -9,6 +9,7 @@ import 'package:sharem_cli/unique_name.dart';
 
 ArgParser getParser() {
   final parser = ArgParser();
+  parser.addFlag("local", abbr: "l");
   parser.addCommand(
       "send",
       ArgParser()
@@ -53,7 +54,9 @@ void main(List<String> arguments) async {
         }
         return;
       case "recv":
-        await receiveCommand(myName: args.command!.option("name"));
+        await receiveCommand(
+            myName: args.command!.option("name"),
+            useLocalhost: args.flag("local"));
         return;
       case "list":
         await listCommand(Duration(seconds: 4));
@@ -144,7 +147,7 @@ Future<void> sendCommand(
   });
 }
 
-Future<void> receiveCommand({String? myName}) async {
+Future<void> receiveCommand({String? myName, bool useLocalhost = false}) async {
   SharemFileShareRequest? pendingRequest;
   Map<String, Progress> progresses = {};
 
@@ -230,7 +233,10 @@ Future<void> receiveCommand({String? myName}) async {
       return false;
     }
   });
-  final state = await PeerState.initalize(callbacks: callbacks, myName: myName);
+  final state = await PeerState.initalize(
+      InternetAddress(useLocalhost ? "127.0.0.1" : "255.255.255.255"),
+      callbacks: callbacks,
+      myName: myName);
   print(
       "Ready to receive at ${state.selfPeer.address.host}:${state.selfPeer.port} as ${state.selfPeer.uniqueName}");
 }

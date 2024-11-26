@@ -10,8 +10,8 @@ import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
 
 const port = 6972;
-final broadcastAddress = InternetAddress(
-    getEnvironmentVariable("SHAREM_BROADCAST_ADDR") ?? "255.255.255.255");
+// final broadcastAddress = InternetAddress(
+//     getEnvironmentVariable("SHAREM_BROADCAST_ADDR") ?? "127.0.0.1");
 
 String? getEnvironmentVariable(String key) {
   return bool.hasEnvironment(key) ? String.fromEnvironment(key) : null;
@@ -34,13 +34,16 @@ class SharemMessage {
   }
 }
 
-Future<void> startBroadcasting(String payload, Duration interval) async {
+Future<void> startBroadcasting(
+    InternetAddress broadcastAddress, String payload, Duration interval) async {
   while (true) {
-    await Future.delayed(interval, () => sendBroadcast(payload));
+    await Future.delayed(
+        interval, () => sendBroadcast(payload, broadcastAddress));
   }
 }
 
-Future<void> sendBroadcast(String payload) async {
+Future<void> sendBroadcast(
+    String payload, InternetAddress broadcastAddress) async {
   final sender = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
   sender.send(payload.codeUnits, broadcastAddress, port);
 }
@@ -414,12 +417,12 @@ class PeerState {
 
   PeerState._(this.selfPeer);
 
-  static Future<PeerState> initalize(
+  static Future<PeerState> initalize(InternetAddress broadcastAddress,
       {String? myName, ServerCallbacks? callbacks}) async {
     final selfPeer =
         await SharemPeer.initalize(callbacks: callbacks, myName: myName);
     final payload = selfPeer.toMessage().toJSON();
-    startBroadcasting(payload, const Duration(seconds: 1));
+    startBroadcasting(broadcastAddress, payload, const Duration(seconds: 1));
     final state = PeerState._(selfPeer);
     return state;
   }
