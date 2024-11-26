@@ -132,8 +132,8 @@ Future<void> sendCommand(
 
         printProgresses("Sending", progresses);
         await peer.sendFiles(generateUniqueName(), files,
-            progressCallback: (fileName, totalBytes, bytesTransferred) {
-          progresses[fileName]?.setProgress(bytesTransferred);
+            progressCallback: (fileName, progress) {
+          progresses[fileName] = progress;
           printProgresses("Sending", progresses, true);
         });
 

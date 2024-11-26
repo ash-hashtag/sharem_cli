@@ -100,7 +100,7 @@ class SharemFile {
       ProgressCallback progressCallback = emptyProgressCallback}) async* {
     assert(chunkSize > 0);
     final totalByteLength = await fileLength();
-    var bytesSent = 0;
+    final progress = Progress(totalByteLength);
     if (_path != null) {
       final reader = await File(_path).open();
 
@@ -110,8 +110,7 @@ class SharemFile {
           break;
         }
         yield chunk;
-        bytesSent += chunk.lengthInBytes;
-        progressCallback(bytesSent, totalByteLength);
+        progressCallback(progress.addProgress(chunk.lengthInBytes));
 
         // throttle
         // await Future.delayed(Duration(milliseconds: 5));
@@ -122,14 +121,12 @@ class SharemFile {
         final chunk = _rawBody.sublist(
             sentInBytes, min(sentInBytes + chunkSize, _rawBody.lengthInBytes));
         yield chunk;
-        bytesSent += chunk.lengthInBytes;
-        progressCallback(bytesSent, totalByteLength);
+        progressCallback(progress.addProgress(chunk.lengthInBytes));
       }
     } else if (_stream != null) {
       await for (final chunk in _stream) {
         yield Uint8List.fromList(chunk);
-        bytesSent += chunk.length;
-        progressCallback(bytesSent, totalByteLength);
+        progressCallback(progress.addProgress(chunk.length));
       }
     }
   }
@@ -144,9 +141,9 @@ class SharemFile {
   }
 }
 
-typedef ProgressCallback = void Function(int bytesUploaded, int totalBytes);
+typedef ProgressCallback = void Function(Progress progress);
 
-void emptyProgressCallback(int _, int __) {}
+void emptyProgressCallback(Progress _) {}
 
 class ServerCallbacks {
   FutureOr<void> Function(String text) onTextCallback;
@@ -383,7 +380,7 @@ class SharemPeer {
   }
 
   Future<void> sendFiles(String myUniqueName, List<SharemFile> files,
-      {void Function(String fileName, int totalBytes, int bytesTransferred)?
+      {void Function(String fileName, Progress progress)?
           progressCallback}) async {
     {
       final map = Map.fromEntries(await Future.wait(
@@ -407,8 +404,7 @@ class SharemPeer {
       await Future.wait(files.map((e) => sendFile(e,
           progressCallback: progressCallback == null
               ? emptyProgressCallback
-              : (bytesUploaded, totalBytes) =>
-                  progressCallback(e.fileName, totalBytes, bytesUploaded))));
+              : (progress) => progressCallback(e.fileName, progress))));
     }
   }
 }
