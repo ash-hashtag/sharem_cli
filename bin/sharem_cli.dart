@@ -7,8 +7,6 @@ import 'package:args/args.dart';
 import 'package:sharem_cli/sharem_cli.dart';
 import 'package:sharem_cli/unique_name.dart';
 
-const clearLine = '\x1B[2K\x1B[1G';
-
 ArgParser getParser() {
   final parser = ArgParser();
   parser.addCommand(
@@ -127,22 +125,6 @@ Future<void> sendCommand(
       if (filePaths.isEmpty) {
         peer.sendText(text).whenComplete(() => exitOut(0));
       } else {
-        // if (filePaths.length == 1) {
-        //   final filePath = filePaths[0];
-        //   print("Sending File $filePath");
-
-        //   final file = SharemFile.fromPath(filePath);
-
-        //   peer
-        //       .sendFile(file,
-        //           progressCallback: (bytesSent, totalBytes) => stdout.write(
-        //               "${clearLine}Sent $bytesSent/$totalBytes = ${(100 * bytesSent / totalBytes).toStringAsFixed(2)}%"))
-        //       .whenComplete(() {
-        //     stdout.writeln();
-        //     exitOut(0);
-        //   });
-        // } else {
-
         final files = filePaths.map(SharemFile.fromPath).toList();
         final progresses = Map.fromEntries(await Future.wait(files.map(
             (e) async =>
@@ -160,31 +142,6 @@ Future<void> sendCommand(
       }
     }
   });
-}
-
-class Progress {
-  int bytesTransferred;
-  final int totalBytes;
-
-  Progress(this.totalBytes, [this.bytesTransferred = 0]);
-
-  Progress addProgress(int bytes) {
-    assert(bytesTransferred + bytes <= totalBytes);
-    bytesTransferred += bytes;
-    return Progress(bytesTransferred, totalBytes);
-  }
-
-  String toPrettyString() {
-    return "${formatBytes(bytesTransferred)}/${formatBytes(totalBytes)} ${(100 * bytesTransferred / totalBytes).toStringAsFixed(2)} %";
-  }
-
-  bool isComplete() {
-    return bytesTransferred == totalBytes;
-  }
-
-  setProgress(int bytesTransferred) {
-    this.bytesTransferred = bytesTransferred;
-  }
 }
 
 Future<void> receiveCommand({String? myName}) async {

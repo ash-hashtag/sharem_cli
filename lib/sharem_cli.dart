@@ -10,17 +10,19 @@ import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
 
 const port = 6972;
+final broadcastAddress = InternetAddress(
+    getEnvironmentVariable("SHAREM_BROADCAST_ADDR") ?? "255.255.255.255");
 
 String? getEnvironmentVariable(String key) {
   return bool.hasEnvironment(key) ? String.fromEnvironment(key) : null;
 }
 
-class Message {
+class SharemMessage {
   final InternetAddress fromAddress;
   final int fromPort;
   final Uint8List data;
 
-  const Message({
+  const SharemMessage({
     required this.fromAddress,
     required this.fromPort,
     required this.data,
@@ -28,13 +30,9 @@ class Message {
 
   @override
   String toString() {
-    return "Message { from: ${fromAddress.host}:$fromPort, data: ${String.fromCharCodes(data)} }";
+    return "SharemMessage { from: ${fromAddress.host}:$fromPort, data: ${String.fromCharCodes(data)} }";
   }
 }
-
-// final broadcastAddress = InternetAddress("255.255.255.255");
-final broadcastAddress = InternetAddress(
-    getEnvironmentVariable("SHAREM_BROADCAST_ADDR") ?? "127.0.0.1");
 
 Future<void> startBroadcasting(String payload, Duration interval) async {
   while (true) {
@@ -47,14 +45,14 @@ Future<void> sendBroadcast(String payload) async {
   sender.send(payload.codeUnits, broadcastAddress, port);
 }
 
-Stream<Message> listenForBroadcasts() async* {
+Stream<SharemMessage> listenForBroadcasts() async* {
   final receiver = await RawDatagramSocket.bind(InternetAddress.anyIPv4, port);
 
   await for (final event in receiver) {
     if (event == RawSocketEvent.read) {
       final datagram = receiver.receive();
       if (datagram != null) {
-        yield Message(
+        yield SharemMessage(
             fromAddress: datagram.address,
             fromPort: datagram.port,
             data: datagram.data);
@@ -494,4 +492,29 @@ String formatBytes(int n, [int fixed = 2]) {
   }
 
   return "${(n / tera).toStringAsFixed(fixed)}TB";
+}
+
+class Progress {
+  int bytesTransferred;
+  final int totalBytes;
+
+  Progress(this.totalBytes, [this.bytesTransferred = 0]);
+
+  Progress addProgress(int bytes) {
+    assert(bytesTransferred + bytes <= totalBytes);
+    bytesTransferred += bytes;
+    return Progress(bytesTransferred, totalBytes);
+  }
+
+  String toPrettyString() {
+    return "${formatBytes(bytesTransferred)}/${formatBytes(totalBytes)} ${(100 * bytesTransferred / totalBytes).toStringAsFixed(2)} %";
+  }
+
+  bool isComplete() {
+    return bytesTransferred == totalBytes;
+  }
+
+  setProgress(int bytesTransferred) {
+    this.bytesTransferred = bytesTransferred;
+  }
 }
