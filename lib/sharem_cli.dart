@@ -9,14 +9,6 @@ import 'package:sharem_cli/unique_name.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
 
-const port = 6972;
-// final broadcastAddress = InternetAddress(
-//     getEnvironmentVariable("SHAREM_BROADCAST_ADDR") ?? "127.0.0.1");
-
-String? getEnvironmentVariable(String key) {
-  return bool.hasEnvironment(key) ? String.fromEnvironment(key) : null;
-}
-
 class SharemMessage {
   final InternetAddress fromAddress;
   final int fromPort;
@@ -42,14 +34,16 @@ Future<void> startBroadcasting(
   }
 }
 
-Future<void> sendBroadcast(
-    String payload, InternetAddress broadcastAddress) async {
+const defaultPort = 6972;
+
+Future<void> sendBroadcast(String payload, InternetAddress broadcastAddress,
+    [int port = defaultPort]) async {
   final sender = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
   sender.broadcastEnabled = true;
   sender.send(payload.codeUnits, broadcastAddress, port);
 }
 
-Stream<SharemMessage> listenForBroadcasts() async* {
+Stream<SharemMessage> listenForBroadcasts([int port = defaultPort]) async* {
   final receiver = await RawDatagramSocket.bind(InternetAddress.anyIPv4, port);
   receiver.broadcastEnabled = true;
 
@@ -101,7 +95,7 @@ class SharemFile {
   }
 
   Stream<Uint8List> asStream(
-      {int chunkSize = 64 * 1024,
+      {int chunkSize = 128 * 1024,
       ProgressCallback progressCallback = emptyProgressCallback}) async* {
     assert(chunkSize > 0);
     final totalByteLength = await fileLength();
@@ -504,7 +498,7 @@ class Progress {
   Progress addProgress(int bytes) {
     assert(bytesTransferred + bytes <= totalBytes);
     bytesTransferred += bytes;
-    return Progress(bytesTransferred, totalBytes);
+    return Progress(totalBytes, bytesTransferred);
   }
 
   String toPrettyString() {

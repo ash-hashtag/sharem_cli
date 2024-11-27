@@ -150,8 +150,8 @@ Future<void> sendCommand(
 Future<void> receiveCommand({String? myName, bool useLocalhost = false}) async {
   SharemFileShareRequest? pendingRequest;
   Map<String, Progress> progresses = {};
+  final directoryPath = Platform.environment['SHAREM_SAVE_DIR'] ?? "/tmp/";
 
-  final directoryPath = getEnvironmentVariable("SHAREM_SAVE_DIR") ?? "/tmp/";
   final callbacks = ServerCallbacks(onTextCallback: (text) {
     print("Received '$text'");
   }, onFileCallback: (fileName, fileLength, stream) async {
