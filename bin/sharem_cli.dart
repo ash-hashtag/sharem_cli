@@ -9,20 +9,25 @@ import 'package:sharem_cli/unique_name.dart';
 
 ArgParser getParser() {
   final parser = ArgParser();
-  parser.addFlag("local", abbr: "l");
+  parser.addOption("name",
+      abbr: "N",
+      defaultsTo: generateUniqueName(),
+      help: "Set your name for others");
   parser.addCommand(
       "send",
       ArgParser()
         ..addOption("name", abbr: 'n', help: "Set Receiver name")
         ..addMultiOption("file", abbr: 'f', help: "File path to send")
-        ..addFlag("text", abbr: 't', help: "Text mode, reads from stdin"));
+      // ..addFlag("text", abbr: 't', help: "Text mode, reads from stdin")
+      );
   parser.addCommand(
-      "recv",
-      ArgParser()
-        ..addOption("name",
-            abbr: "n",
-            defaultsTo: generateUniqueName(),
-            help: "Set your name for others"));
+    "recv",
+    // ArgParser()
+    //   ..addOption("name",
+    //       abbr: "n",
+    //       defaultsTo: generateUniqueName(),
+    //       help: "Set your name for others")
+  );
   parser.addCommand("list", ArgParser()..addOption("timeout", abbr: "t"));
 
   return parser;
@@ -34,37 +39,42 @@ ArgResults parseArgs(List<String> arguments) {
 }
 
 void main(List<String> arguments) async {
-  final args = parseArgs(arguments);
+  try {
+    final args = parseArgs(arguments);
+    final myName = args.option("name") ?? generateUniqueName();
 
-  if (args.command?.name != null) {
-    switch (args.command!.name!) {
-      case "send":
-        {
-          final sendTo = args.command!.option("name");
-          if (sendTo == null) {
-            print("missing --name option to send to");
-            exitOut(1);
-            return;
+    if (args.command?.name != null) {
+      switch (args.command!.name!) {
+        case "send":
+          {
+            final sendTo = args.command!.option("name");
+            if (sendTo == null) {
+              print("missing --name option to send to");
+              exitOut(1);
+              return;
+            }
+
+            await sendCommand(
+              sendTo: sendTo,
+              filePaths: args.command!.multiOption("file"),
+            );
           }
-
-          await sendCommand(
-            sendTo: sendTo,
-            filePaths: args.command!.multiOption("file"),
+          return;
+        case "recv":
+          await receiveCommand(
+            myName: myName,
           );
-        }
-        return;
-      case "recv":
-        await receiveCommand(
-            myName: args.command!.option("name"),
-            useLocalhost: args.flag("local"));
-        return;
-      case "list":
-        await listCommand(Duration(seconds: 4));
-        exitOut(0);
-        return;
-      default:
+          return;
+        case "list":
+          await listCommand(Duration(seconds: 4));
+          exitOut(0);
+          return;
+        default:
+      }
     }
-  }
+
+    // ignore: empty_catches
+  } catch (_err) {}
   print("Unknown command");
   printUsage();
   exitOut(3);
@@ -73,7 +83,10 @@ void main(List<String> arguments) async {
 void printUsage() {
   final executable = p.basename(Platform.script.toString());
   final s = """
-    $executable [command] <options>
+    $executable <options> [command] <options>
+
+    options:
+      --name -N <your_name> if not passed, generates a unique name
     
     commands:
       send
@@ -81,11 +94,10 @@ void printUsage() {
           -t flag reads from stdin and sends to receiver
           -f file paths to send
       recv
-          -n your_name if not passed, generates a unique name
       list
           lists nearby active peers
     Example Usage:
-      $executable recv -n JaneDoe
+      $executable -N JaneDoe recv
       echo 'Hello World' | $executable send -n  JaneDoe
       $executable send -n JaneDoe -f ./README.md ./cat-video.mp4
       $executable list
@@ -109,9 +121,13 @@ Future<PeerGatherer> listCommand(
 Future<void> sendCommand(
     {required String sendTo,
     List<String> filePaths = const [],
-    Duration timeout = const Duration(seconds: 5)}) async {
+    Duration timeout = const Duration(seconds: 5),
+    String? myUniqueName}) async {
   final gatherer = PeerGatherer();
   final payload = <int>[];
+  myUniqueName ??= generateUniqueName();
+
+  print("Sending as $myUniqueName");
 
   if (filePaths.isEmpty) {
     await for (final chunk in stdin) {
@@ -126,20 +142,23 @@ Future<void> sendCommand(
       gatherer.dispose();
       final text = utf8.decode(payload);
       if (filePaths.isEmpty) {
-        peer.sendText(text).whenComplete(() => exitOut(0));
+        peer.sendText(myUniqueName!, text).whenComplete(() => exitOut(0));
       } else {
         final files = filePaths.map(SharemFile.fromPath).toList();
         final progresses = Map.fromEntries(await Future.wait(files.map(
             (e) async =>
                 MapEntry(e.fileName, Progress(await e.fileLength())))));
 
+        final uniqueCode = generateUniqueCode();
+        print("===============");
+        print("Unique Code: $uniqueCode");
         printProgresses("Sending", progresses);
-        await peer.sendFiles(generateUniqueName(), files,
+        await peer.sendFiles(myUniqueName!, files, uniqueCode: uniqueCode,
             progressCallback: (fileName, progress) {
           progresses[fileName] = progress;
           printProgresses("Sending", progresses, true);
         });
-
+        print("===============");
         exitOut(0);
         // }
       }
@@ -147,29 +166,38 @@ Future<void> sendCommand(
   });
 }
 
-Future<void> receiveCommand({String? myName, bool useLocalhost = false}) async {
+Future<void> receiveCommand({String? myName}) async {
   SharemFileShareRequest? pendingRequest;
   Map<String, Progress> progresses = {};
   final directoryPath = Platform.environment['SHAREM_SAVE_DIR'] ?? "/tmp/";
 
-  final callbacks = ServerCallbacks(onTextCallback: (text) {
-    print("Received '$text'");
-  }, onFileCallback: (fileName, fileLength, stream) async {
+  final callbacks =
+      ServerCallbacks(onTextCallback: (uniqueName, clientAddress, text) {
+    print("'$uniqueName:${clientAddress.host}' sent: '$text'");
+  }, onFileCallback: (uniqueName, uniqueCode, sharemFile) async {
+    final fileName = sharemFile.fileName;
+    final fileLength = await sharemFile.fileLength();
     if (pendingRequest != null) {
-      if (pendingRequest!.fileNameAndLength[fileName] != fileLength) {
-        print(
-            "Rejected, File Lengths mismatch expected ${pendingRequest!.fileNameAndLength[fileName]} got $fileLength");
+      if (pendingRequest!.fileNameAndLength[fileName] != fileLength &&
+          pendingRequest!.uniqueName == uniqueName &&
+          pendingRequest!.uniqueCode == uniqueCode) {
+        print("Rejected, Request mismatch fields");
         return;
       }
       final file = File(p.join(directoryPath, fileName));
       final sink = file.openWrite();
-      final progress = progresses[fileName]!;
-
-      await for (final chunk in stream) {
-        sink.add(chunk);
-        progress.addProgress(chunk.length);
+      // final progress = progresses[fileName]!;
+      final stream = sharemFile.asStream(progressCallback: (progress) {
+        progresses[fileName] = progress;
         printProgresses("Receiving", progresses, true);
-      }
+      });
+      await sink.addStream(stream);
+
+      // await for (final chunk in stream) {
+      //   sink.add(chunk);
+      //   progress.addProgress(chunk.length);
+      //   printProgresses("Receiving", progresses, true);
+      // }
 
       await sink.flush();
       await sink.close();
@@ -184,30 +212,6 @@ Future<void> receiveCommand({String? myName, bool useLocalhost = false}) async {
 
       return;
     }
-
-    // print("Receiving a File '$fileName' of Length $fileLength");
-    // if (!askAccept()) {
-    //   return;
-    // }
-
-    // // TODO: Do Validation of file name
-
-    // final file = File(p.join(directoryPath, fileName));
-    // final sink = file.openWrite();
-    // final progress = Progress(fileLength);
-
-    // await for (final chunk in stream) {
-    //   sink.add(chunk);
-    //   progress.addProgress(chunk.length);
-
-    //   stdout.write("${clearLine}Received ${progress.toPrettyString()}");
-    // }
-    // stdout.writeln();
-
-    // await sink.flush();
-    // await sink.close();
-
-    // print("Saved File ${file.path}");
   }, onFileShareRequest: (request) {
     if (pendingRequest != null) {
       print(
@@ -215,8 +219,9 @@ Future<void> receiveCommand({String? myName, bool useLocalhost = false}) async {
       return false;
     }
 
-    print("'${request.uniqueName}' wants to send these files to you");
     print('================================');
+    print("'${request.uniqueName}' wants to send these files to you");
+    print("Unique Code: ${request.uniqueCode}");
     for (final entry in request.fileNameAndLength.entries) {
       print('filename: ${entry.key} size: ${formatBytes(entry.value)}');
     }
@@ -234,14 +239,12 @@ Future<void> receiveCommand({String? myName, bool useLocalhost = false}) async {
     }
   });
 
-  if (useLocalhost) {
-    print("WARN: Using Localhost");
-  }
+  // if (useLocalhost) {
+  //   print("WARN: Using Localhost");
+  // }
 
-  final state = await PeerState.initalize(
-      InternetAddress(useLocalhost ? "127.0.0.1" : "255.255.255.255"),
-      callbacks: callbacks,
-      myName: myName);
+  final state = await PeerState.initalize(InternetAddress("255.255.255.255"),
+      callbacks: callbacks, myName: myName);
   print(
       "Ready to receive at ${state.selfPeer.address.host}:${state.selfPeer.port} as ${state.selfPeer.uniqueName}");
 }

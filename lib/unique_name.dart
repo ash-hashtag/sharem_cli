@@ -2401,11 +2401,13 @@ const colors = [
 
 String generateUniqueName([int maxLength = 20]) {
   final rng = Random();
-  final color = colors[rng.nextInt(colors.length)];
-  final fruit = fruitNames[rng.nextInt(fruitNames.length)];
+  var color = colors[rng.nextInt(colors.length)];
+  var fruit = fruitNames[rng.nextInt(fruitNames.length)];
 
-  if (color.length + fruit.length + 1 > maxLength) {
-    return generateUniqueName(maxLength);
+  while (color.length + fruit.length + 1 > maxLength) {
+    color = colors[rng.nextInt(colors.length)];
+    fruit = fruitNames[rng.nextInt(fruitNames.length)];
   }
+
   return "$color $fruit";
 }

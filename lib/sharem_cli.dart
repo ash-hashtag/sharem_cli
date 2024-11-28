@@ -78,20 +78,23 @@ class SharemFile {
   final Uint8List? _rawBody;
   final String? _path;
   final Stream<List<int>>? _stream;
+  final int? _streamLength;
 
-  SharemFile._(this.fileName, this._rawBody, this._path, this._stream);
+  SharemFile._(this.fileName, this._rawBody, this._path, this._stream,
+      this._streamLength);
 
   factory SharemFile.fromPath(String path) {
     final fileName = p.basename(path);
-    return SharemFile._(fileName, null, path, null);
+    return SharemFile._(fileName, null, path, null, null);
   }
 
   factory SharemFile.fromBody(String fileName, Uint8List body) {
-    return SharemFile._(fileName, body, null, null);
+    return SharemFile._(fileName, body, null, null, null);
   }
 
-  factory SharemFile.fromStream(String fileName, Stream<List<int>> stream) {
-    return SharemFile._(fileName, null, null, stream);
+  factory SharemFile.fromStream(
+      String fileName, Stream<List<int>> stream, int length) {
+    return SharemFile._(fileName, null, null, stream, length);
   }
 
   Stream<Uint8List> asStream(
@@ -135,6 +138,8 @@ class SharemFile {
       return await File(_path).length();
     } else if (_rawBody != null) {
       return _rawBody.lengthInBytes;
+    } else if (_stream != null && _streamLength != null) {
+      return _streamLength;
     }
     throw Exception("Invalid File Format");
   }
@@ -145,9 +150,10 @@ typedef ProgressCallback = void Function(Progress progress);
 void emptyProgressCallback(Progress _) {}
 
 class ServerCallbacks {
-  FutureOr<void> Function(String text) onTextCallback;
-  FutureOr<void> Function(
-      String fileName, int fileLength, Stream<List<int>> stream) onFileCallback;
+  FutureOr<void> Function(String uniqueName, InternetAddress, String text)
+      onTextCallback;
+  FutureOr<void> Function(String uniqueName, String uniqueCode, SharemFile file)
+      onFileCallback;
 
   FutureOr<bool> Function(SharemFileShareRequest request) onFileShareRequest;
 
@@ -177,6 +183,14 @@ Future<Response> handlePost(
   Request request, {
   ServerCallbacks? callbacks,
 }) async {
+  final clientAddress =
+      (request.context['shelf.io.connection_info'] as HttpConnectionInfo?)
+          ?.remoteAddress
+          .address;
+  if (clientAddress == null) {
+    return Response(400, body: "Client Address Can't be found");
+  }
+
   switch (request.url.path) {
     case "file":
       {
@@ -195,9 +209,22 @@ Future<Response> handlePost(
           return Response(400, body: "Invalid Content Length");
         }
 
+        final uniqueName = request.headers['x-sharem-unique-name'];
+        final uniqueCode = request.headers['x-sharem-unique-code'];
+
+        if ((uniqueName == null || uniqueCode == null) ||
+            (uniqueName.isEmpty || uniqueCode.isEmpty)) {
+          return Response(400,
+              body:
+                  "Missing x-sharem-unique-name or x-sharem-unique-code headers");
+        }
+
         if (null != callbacks) {
           await callbacks.onFileCallback(
-              fileName, contentLengthInBytes, request.read());
+              uniqueName,
+              uniqueCode,
+              SharemFile.fromStream(
+                  fileName, request.read(), contentLengthInBytes));
         }
 
         return Response(200);
@@ -205,9 +232,14 @@ Future<Response> handlePost(
 
     case "text":
       {
+        final uniqueName = request.headers['x-sharem-unique-name'];
+        if (uniqueName == null || uniqueName.isEmpty) {
+          return Response(400, body: 'missing x-sharem-unique-name header');
+        }
         final body = await request.readAsString();
         if (callbacks != null) {
-          await callbacks.onTextCallback(body);
+          await callbacks.onTextCallback(
+              uniqueName, InternetAddress(clientAddress), body);
         }
         return Response(200);
       }
@@ -215,14 +247,7 @@ Future<Response> handlePost(
     case "files":
       {
         final body = await request.readAsString();
-        final clientAddress =
-            (request.context['shelf.io.connection_info'] as HttpConnectionInfo?)
-                ?.remoteAddress
-                .address;
 
-        if (clientAddress == null) {
-          return Response(400, body: "Client Address Can't be found");
-        }
         final fileRequest = SharemFileShareRequest.fromJSON(
             InternetAddress(clientAddress), body);
 
@@ -251,16 +276,17 @@ class SharemFileShareRequest {
   final String uniqueName;
   final InternetAddress address;
   final Map<String, int> fileNameAndLength;
+  final String uniqueCode;
 
   const SharemFileShareRequest(
-      this.uniqueName, this.address, this.fileNameAndLength);
+      this.uniqueName, this.address, this.fileNameAndLength, this.uniqueCode);
 
   factory SharemFileShareRequest.fromJSON(
       InternetAddress address, String body) {
     final map = Map<String, dynamic>.from(json.decode(body));
     assert(map['version'] == protocolVersion);
-    return SharemFileShareRequest(
-        map['uniqueName'], address, Map<String, int>.from(map['files']));
+    return SharemFileShareRequest(map['uniqueName'], address,
+        Map<String, int>.from(map['files']), map['uniqueCode']);
   }
 
   String toJSON() {
@@ -268,6 +294,7 @@ class SharemFileShareRequest {
       'uniqueName': uniqueName,
       'files': fileNameAndLength,
       'version': protocolVersion,
+      'uniqueCode': uniqueCode,
     });
   }
 }
@@ -349,8 +376,9 @@ class SharemPeer {
     }
   }
 
-  Future<void> sendText(String text) async {
+  Future<void> sendText(String myUniqueName, String text) async {
     final headers = <String, String>{};
+    headers['x-sharem-unique-name'] = myUniqueName;
     final response =
         await http.post(buildUri(ShareType.text), body: text, headers: headers);
     final body = response.body;
@@ -359,10 +387,13 @@ class SharemPeer {
     }
   }
 
-  Future<void> sendFile(SharemFile file,
+  Future<void> sendFile(
+      String myUniqueName, String myUniqueCode, SharemFile file,
       {ProgressCallback progressCallback = emptyProgressCallback}) async {
     final headers = <String, String>{};
-    headers['Content-Length'] = (await file.fileLength()).toString();
+    headers['content-length'] = (await file.fileLength()).toString();
+    headers['x-sharem-unique-name'] = myUniqueName;
+    headers['x-sharem-unique-code'] = myUniqueCode;
     final uri = buildUri(ShareType.file, file.fileName);
     final request = http.StreamedRequest("POST", uri);
     request.headers.addAll(headers);
@@ -379,28 +410,31 @@ class SharemPeer {
   }
 
   Future<void> sendFiles(String myUniqueName, List<SharemFile> files,
-      {void Function(String fileName, Progress progress)?
-          progressCallback}) async {
+      {void Function(String fileName, Progress progress)? progressCallback,
+      String? uniqueCode}) async {
     {
       final map = Map.fromEntries(await Future.wait(
           files.map((e) async => MapEntry(e.fileName, await e.fileLength()))));
 
-      final payload =
-          SharemFileShareRequest(myUniqueName, InternetAddress.anyIPv4, map)
-              .toJSON();
+      uniqueCode ??= generateUniqueCode();
+      final payload = SharemFileShareRequest(
+        myUniqueName,
+        InternetAddress.anyIPv4,
+        map,
+        uniqueCode,
+      ).toJSON();
 
       final uri = buildUri(ShareType.files);
       final response = await http.post(uri, body: payload);
 
       final body = response.body;
-      log("Send Files $uri Response ${response.statusCode} $body");
       if (response.statusCode != 200) {
         // Rejected
         throw Exception("Response ${response.statusCode} $body");
       }
       // Accepted
 
-      await Future.wait(files.map((e) => sendFile(e,
+      await Future.wait(files.map((e) => sendFile(myUniqueName, uniqueCode!, e,
           progressCallback: progressCallback == null
               ? emptyProgressCallback
               : (progress) => progressCallback(e.fileName, progress))));
@@ -512,4 +546,15 @@ class Progress {
   setProgress(int bytesTransferred) {
     this.bytesTransferred = bytesTransferred;
   }
+}
+
+String generateUniqueCode([int length = 6]) {
+  var s = '';
+
+  final rng = Random();
+  for (var i = 0; i < length; i++) {
+    s += rng.nextInt(10).toString();
+  }
+
+  return s;
 }
