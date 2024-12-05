@@ -9,6 +9,8 @@ import 'package:sharem_cli/unique_name.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
 
+final myHash = generateUniqueHash();
+
 class SharemMessage {
   final InternetAddress fromAddress;
   final int fromPort;
@@ -26,21 +28,26 @@ class SharemMessage {
   }
 }
 
+const defaultPort = 6972;
 Future<void> startBroadcasting(
-    InternetAddress broadcastAddress, String payload, Duration interval) async {
+    InternetAddress broadcastAddress, String payload, Duration interval,
+    [int port = defaultPort]) async {
+  final sender = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+  sender.broadcastEnabled = true;
+
+  final data = utf8.encode(payload);
+
   while (true) {
     await Future.delayed(
-        interval, () => sendBroadcast(payload, broadcastAddress));
+        interval, () => sender.send(data, broadcastAddress, port));
   }
 }
-
-const defaultPort = 6972;
 
 Future<void> sendBroadcast(String payload, InternetAddress broadcastAddress,
     [int port = defaultPort]) async {
   final sender = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
   sender.broadcastEnabled = true;
-  sender.send(payload.codeUnits, broadcastAddress, port);
+  sender.send(utf8.encode(payload), broadcastAddress, port);
 }
 
 Stream<SharemMessage> listenForBroadcasts([int port = defaultPort]) async* {
@@ -66,7 +73,9 @@ Stream<SharemPeer> listenForPeers() async* {
       final msgText = utf8.decode(message.data);
       final peerMsg = SharemPeerMessage.fromJSON(msgText);
       final peer = SharemPeer.fromMessage(peerMsg, message.fromAddress);
-      yield peer;
+      if (peer.uniqueHash != myHash) {
+        yield peer;
+      }
     } catch (e) {
       stderr.writeln("parsing broadcast datagram failed, ignoring");
     }
@@ -304,21 +313,26 @@ const protocolVersion = "sharem-0.0.1";
 class SharemPeerMessage {
   final int port;
   final String uniqueName;
+  final String uniqueHash;
 
-  SharemPeerMessage(this.port, this.uniqueName);
+  SharemPeerMessage(this.port, this.uniqueName, this.uniqueHash);
 
   String toJSON() {
     return json.encode({
       'version': protocolVersion,
       'port': port,
       'uniqueName': uniqueName,
+      'uniqueHash': uniqueHash,
     });
   }
 
   factory SharemPeerMessage.fromJSON(String s) {
     final map = Map<String, dynamic>.from(json.decode(s));
-    assert(map['version'] == protocolVersion);
-    return SharemPeerMessage(map['port'], map['uniqueName']);
+    if (map['version'] != protocolVersion) {
+      throw ("Invalid Protocol Version expected $protocolVersion received ${map['version']}");
+    }
+
+    return SharemPeerMessage(map['port'], map['uniqueName'], map['uniqueHash']);
   }
 }
 
@@ -332,30 +346,37 @@ class SharemPeer {
   final InternetAddress address;
   final int port;
   final String uniqueName;
+  final String uniqueHash;
 
   SharemPeer({
     required this.address,
     required this.port,
     required this.uniqueName,
+    required this.uniqueHash,
   });
 
   static Future<SharemPeer> initalize(
-      {String? myName, ServerCallbacks? callbacks}) async {
+      {String? myName, String? uniqueHash, ServerCallbacks? callbacks}) async {
     final server = await startHttpServer(0, callbacks: callbacks);
     return SharemPeer(
-        port: server.port,
-        address: server.address,
-        uniqueName: myName ?? generateUniqueName());
+      port: server.port,
+      address: server.address,
+      uniqueName: myName ?? generateUniqueName(),
+      uniqueHash: uniqueHash ?? myHash,
+    );
   }
 
   factory SharemPeer.fromMessage(
       SharemPeerMessage message, InternetAddress address) {
     return SharemPeer(
-        address: address, port: message.port, uniqueName: message.uniqueName);
+        address: address,
+        port: message.port,
+        uniqueName: message.uniqueName,
+        uniqueHash: message.uniqueHash);
   }
 
   SharemPeerMessage toMessage() {
-    return SharemPeerMessage(port, uniqueName);
+    return SharemPeerMessage(port, uniqueName, uniqueHash);
   }
 
   Uri buildUri(ShareType shareType, [String? fileName]) {

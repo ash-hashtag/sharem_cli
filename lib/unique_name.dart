@@ -2411,3 +2411,15 @@ String generateUniqueName([int maxLength = 20]) {
 
   return "$color $fruit";
 }
+
+String generateUniqueHash([int length = 256]) {
+  var s = '';
+  final rng = Random.secure();
+  const chars =
+      "0123456789_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+  for (var i = 0; i < length; i++) {
+    s += chars[rng.nextInt(chars.length)];
+  }
+
+  return s;
+}
