@@ -61,6 +61,9 @@ jobs:
           name: windows-latest-cli
           path: build/windows
 
+      - name: Tree
+        run: tree build
+
       - name: Create Release
         uses: ncipollo/release-action@v1
         with:
