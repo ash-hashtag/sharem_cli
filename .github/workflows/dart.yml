@@ -70,10 +70,9 @@ jobs:
           artifacts: |
             build/ubuntu/sharem
             build/macos/sharem
-            build/windows/sharem.exe
+            build/windows/sharem
           token: ${{ secrets.GITHUB_TOKEN }}
-          tag: ${{ github.ref_name }}
-          name: Release ${{ github.ref_name }}
+          name: Release
           body: |
             Automated release of CLI for Dart.
             - Linux: `sharem`
