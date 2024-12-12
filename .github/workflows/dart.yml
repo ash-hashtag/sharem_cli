@@ -6,6 +6,7 @@ on:
 
 jobs:
   build:
+    permissions: write-all
     name: Build CLI for Each OS
     runs-on: ${{ matrix.os }}
     strategy:
@@ -35,6 +36,7 @@ jobs:
           path: build/${{ matrix.os }}
 
   release:
+    permissions: write-all
     name: Create Release
     needs: build
     runs-on: ubuntu-latest
