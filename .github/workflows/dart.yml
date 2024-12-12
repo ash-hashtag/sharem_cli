@@ -72,8 +72,7 @@ jobs:
             build/macos/sharem
             build/windows/sharem
           token: ${{ secrets.GITHUB_TOKEN }}
-          tag: ${{ github.sha }}
-          name: Release ${{ github.ref_name }}
+          name: Release
           body: |
             Automated release of CLI for Dart.
             - Linux: `sharem`
