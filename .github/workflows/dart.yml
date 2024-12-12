@@ -1,0 +1,76 @@
+name: Dart CLI Build and Release
+
+on:
+  push:
+    branches: ["main"]
+
+jobs:
+  build:
+    name: Build CLI for Each OS
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Dart
+        uses: dart-lang/setup-dart@v2
+        with:
+          sdk: stable
+
+      - name: Install Dependencies
+        run: dart pub get
+
+      - name: Build CLI
+        run: |
+          dart compile exe bin/main.dart -o build/${{ matrix.os }}/sharem
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ matrix.os }}-cli
+          path: build/${{ matrix.os }}
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: ubuntu-latest-cli
+          path: build/ubuntu
+
+      - name: Download macOS Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: macos-latest-cli
+          path: build/macos
+
+      - name: Download Windows Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: windows-latest-cli
+          path: build/windows
+
+      - name: Create Release
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: |
+            build/ubuntu/sharem
+            build/macos/sharem
+            build/windows/sharem.exe
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          body: |
+            Automated release of CLI for Dart.
+            - Linux: `sharem`
+            - macOS: `sharem`
+            - Windows: `sharem.exe`
+
