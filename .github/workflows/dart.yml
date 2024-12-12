@@ -2,8 +2,7 @@ name: Dart CLI Build and Release
 
 on:
   push:
-    tags:
-      - '*'
+    branches: ["main"]
 
 jobs:
   build:
@@ -66,17 +65,15 @@ jobs:
         run: tree build
 
       - name: Create Release
-        uses: ncipollo/release-action@v1
-        with:
-          artifacts: |
-            build/ubuntu/sharem
-            build/macos/sharem
-            build/windows/sharem
-          token: ${{ secrets.GITHUB_TOKEN }}
-          name: Release
-          body: |
-            Automated release of CLI for Dart.
-            - Linux: `sharem`
-            - macOS: `sharem`
-            - Windows: `sharem.exe`
+        run: |
+          gh release create ${{ github.ref_name }} \
+            build/ubuntu/sharem \
+            build/macos/sharem \
+            build/windows/sharem \
+            --title "Release ${{ github.ref_name }}" \
+            --notes "Automated release of CLI for Dart.\n- Linux: `sharem`\n- macOS: `sharem`\n- Windows: `sharem.exe`"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+        
 
