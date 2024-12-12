@@ -27,6 +27,7 @@ jobs:
 
       - name: Build CLI
         run: |
+          mkdir -p build/${{ matrix.os }}
           dart compile exe bin/main.dart -o build/${{ matrix.os }}/sharem
 
       - name: Upload Build Artifact
