@@ -68,6 +68,9 @@ jobs:
           cd ../../build/macos && zip sharem-macos-x86_64.zip sharem
           cd ../../
 
+      - name: List
+        run: tree build
+
       - name: Create Release
         uses: ncipollo/release-action@v1
         with:
@@ -76,9 +79,9 @@ jobs:
           name: Release
           makeLatest: "latest"
           artifacts: |
-            build/windows/sharem-windows.zip
-            build/ubuntu/sharem-linux.zip
-            build/macos/sharem-macos.zip
+            build/windows/sharem-windows-x86_64.zip
+            build/ubuntu/sharem-linux-x86_64.zip
+            build/macos/sharem-macos-x86_64.zip
 
         
 
