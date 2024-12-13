@@ -61,9 +61,12 @@ jobs:
           name: windows-latest-cli
           path: build/windows
 
-      - name: Tree
-        run: tree build
-
+      - name: Zip Executables
+        run: |
+          cd build/ubuntu && zip sharem-linux-x86_64.zip sharem
+          cd ../../build/windows && zip sharem-windows-x86_64.zip sharem
+          cd ../../build/macos && zip sharem-macos-x86_64.zip sharem
+          cd ../../
 
       - name: Create Release
         uses: ncipollo/release-action@v1
@@ -73,9 +76,9 @@ jobs:
           name: Release
           makeLatest: "latest"
           artifacts: |
-            build/windows/sharem
-            build/ubuntu/sharem
-            build/macos/sharem
+            build/windows/sharem-windows.zip
+            build/ubuntu/sharem-linux.zip
+            build/macos/sharem-macos.zip
 
         
 
