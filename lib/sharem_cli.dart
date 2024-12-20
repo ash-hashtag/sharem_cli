@@ -434,6 +434,13 @@ class SharemPeer {
       {void Function(String fileName, Progress progress)? progressCallback,
       String? uniqueCode}) async {
     {
+      for (final file in files) {
+        if (!isValidFileName(file.fileName)) {
+          throw Exception(
+              "File can be rejected because of the file name '${file.fileName}' ");
+        }
+      }
+
       final map = Map.fromEntries(await Future.wait(
           files.map((e) async => MapEntry(e.fileName, await e.fileLength()))));
 

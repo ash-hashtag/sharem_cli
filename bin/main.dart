@@ -223,7 +223,12 @@ Future<void> receiveCommand({String? myName}) async {
     print("'${request.uniqueName}' wants to send these files to you");
     print("Unique Code: ${request.uniqueCode}");
     for (final entry in request.fileNameAndLength.entries) {
-      print('filename: ${entry.key} size: ${formatBytes(entry.value)}');
+      final fileName = entry.key;
+
+      if (!isValidFileName(fileName)) {
+        print("WARN: this file name could be dangerous $fileName");
+      }
+      print('filename: $fileName size: ${formatBytes(entry.value)}');
     }
     print('================================');
     if (askAccept()) {
