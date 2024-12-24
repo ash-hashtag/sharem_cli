@@ -2,7 +2,8 @@ name: Dart CLI Build and Release
 
 on:
   push:
-    branches: ["main"]
+      tags:
+        - "[0-9]+.[0-9]+.[0-9]+"
 
 jobs:
   build:
@@ -63,7 +64,7 @@ jobs:
 
       - name: Zip Executables
         run: |
-          cd build/ubuntu && zip sharem-linux-x86_64.zip sharem
+          cd build/ubuntu && zip sharem-linux-x86_64.zip sharem 
           cd ../../build/windows && zip sharem-windows-x86_64.zip sharem
           cd ../../build/macos && zip sharem-macos-x86_64.zip sharem
           cd ../../

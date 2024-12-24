@@ -277,8 +277,7 @@ Future<Response> handlePost(
 }
 
 bool isValidFileName(String fileName) {
-  final regexp = RegExp(r'[. A-Za-z0-9_-]+');
-  return regexp.stringMatch(fileName) == fileName;
+  return !fileName.contains(RegExp(r'[\\/]'));
 }
 
 class SharemFileShareRequest {
