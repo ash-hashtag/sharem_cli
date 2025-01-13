@@ -550,20 +550,92 @@ String formatBytes(int n, [int fixed = 2]) {
   return "${(n / tera).toStringAsFixed(fixed)}TB";
 }
 
+String formatBytesDouble(double n, [int fixed = 2]) {
+  const kilo = 1000;
+  const mega = 1000 * kilo;
+  const giga = 1000 * mega;
+  const tera = 1000 * giga;
+
+  if (n < kilo) {
+    return "${n}B";
+  }
+
+  if (n < mega) {
+    return "${(n / kilo).toStringAsFixed(fixed)}KB";
+  }
+
+  if (n < giga) {
+    return "${(n / mega).toStringAsFixed(fixed)}MB";
+  }
+
+  if (n < tera) {
+    return "${(n / giga).toStringAsFixed(fixed)}GB";
+  }
+
+  return "${(n / tera).toStringAsFixed(fixed)}TB";
+}
+
+class ProgressSpeed {
+  final int intervalMilliseconds;
+  var startTimestamp = DateTime.now();
+  List<(DateTime, int)> contentDownloaded = [];
+
+  ProgressSpeed(
+      {required this.intervalMilliseconds,
+      List<(DateTime, int)>? contentDownloaded}) {
+    this.contentDownloaded = contentDownloaded ?? [];
+  }
+
+  void addBytes(int byteLength) {
+    contentDownloaded.add((DateTime.now(), byteLength));
+  }
+
+  double getSpeedInBytesPerMilliseconds() {
+    var totalContentDownloadedInInterval = 0;
+    final startTs =
+        DateTime.now().subtract(Duration(milliseconds: intervalMilliseconds));
+    var index = 0;
+    for (final (ts, byteLength) in contentDownloaded) {
+      if (ts.compareTo(startTs) < 0) {
+        index += 1;
+      } else {
+        totalContentDownloadedInInterval += byteLength;
+      }
+    }
+    if (index > 0) {
+      contentDownloaded = contentDownloaded.sublist(index);
+      startTimestamp = startTs;
+    }
+
+    final value = totalContentDownloadedInInterval / intervalMilliseconds;
+    return value;
+  }
+}
+
 class Progress {
   int bytesTransferred;
   final int totalBytes;
+  late final ProgressSpeed currentSpeed;
 
-  Progress(this.totalBytes, [this.bytesTransferred = 0]);
+  Progress(this.totalBytes,
+      {ProgressSpeed? currentSpeed, this.bytesTransferred = 0}) {
+    this.currentSpeed =
+        currentSpeed ?? ProgressSpeed(intervalMilliseconds: 500);
+  }
 
   Progress addProgress(int bytes) {
     assert(bytesTransferred + bytes <= totalBytes);
     bytesTransferred += bytes;
-    return Progress(totalBytes, bytesTransferred);
+    currentSpeed.addBytes(bytes);
+    return Progress(totalBytes,
+        bytesTransferred: bytesTransferred, currentSpeed: currentSpeed);
   }
 
   String toPrettyString() {
-    return "${formatBytes(bytesTransferred)}/${formatBytes(totalBytes)} ${(100 * bytesTransferred / totalBytes).toStringAsFixed(2)} %";
+    final bytesPerMillis = currentSpeed.getSpeedInBytesPerMilliseconds();
+    final bytesPerSecond = bytesPerMillis * 1000;
+
+    return "${formatBytes(bytesTransferred)}/${formatBytes(totalBytes)} ${(100 * bytesTransferred / totalBytes).toStringAsFixed(2)} % @ ${formatBytesDouble(bytesPerSecond)}/s";
   }
 
   bool isComplete() {
